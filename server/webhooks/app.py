@@ -23,11 +23,11 @@ def webhooks_receive():
     return ''
 
 @app.route("/webhooks_backup", methods=['get'])
-def webhooks_setup():
+def webhooks_backup_setup():
     return request.args.get('hub.challenge')
 
 @app.route("/webhooks_backup", methods=['post'])
-def webhooks_receive():
+def webhooks_backup_receive():
     json = request.get_json()
     logging.info(json)
     DB.save_webhooks_update(json)
