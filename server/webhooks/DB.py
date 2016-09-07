@@ -1,10 +1,7 @@
 import mysql.connector
 import config
 import json
-import logging
-
-import sys
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+from logging_common import logging
 
 def save_webhooks_update(update):
     """Given a string update, decodes it to json and stores it if valid"""
@@ -17,39 +14,94 @@ def save_webhooks_update(update):
 
     connection = mysql.connector.connect(**config.mysql)
     cursor = connection.cursor(buffered=True)
-    
+
+    raw_update_id = insert_raw_webhooks_update(update)
     for entry in entries:
-        fat_ping = 'changes' in entry 
+        fat_ping = 'changes' in entry
         target_id = entry['id']
         time = entry['time']
-        
+
         if fat_ping:
             for change in entry['changes']:
                 value = json.dumps(change)
                 field = change['field']
-                insert_webhooks_update(cursor, target_id, topic, time, field, value)
+                insert_webhooks_update(cursor, raw_update_id, target_id, topic, time, field, value)
         else:
             for field in entry['changed_fields']:
-                insert_webhooks_update(cursor, target_id, topic, time, field, None)
+                insert_webhooks_update(cursor, raw_update_id, target_id, topic, time, field, None)
 
     connection.commit()
     cursor.close()
     connection.close()
-    
+
+def insert_raw_webhooks_update(cursor, update):
+    """Inserts the raw update into the raw table
+    mysql> show indexes from webhooks_raw;
+    +--------------+------------+----------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+
+    | Table        | Non_unique | Key_name | Seq_in_index | Column_name | Collation | Cardinality | Sub_part | Packed | Null | Index_type | Comment | Index_comment |
+    +--------------+------------+----------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+
+    | webhooks_raw |          0 | PRIMARY  |            1 | id          | A         |           0 |     NULL | NULL   |      | BTREE      |         |               |
+    +--------------+------------+----------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+
+    1 row in set (0.00 sec)
+
+    mysql> desc webhooks_raw;
+    +-------+------------------+------+-----+---------+----------------+
+    | Field | Type             | Null | Key | Default | Extra          |
+    +-------+------------------+------+-----+---------+----------------+
+    | id    | int(10) unsigned | NO   | PRI | NULL    | auto_increment |
+    | value | text             | YES  |     | NULL    |                |
+    +-------+------------------+------+-----+---------+----------------+
+    """
+    cursor.execute(
+        "INSERT into webhooks_raw (value) VALUES (%s)",
+        (json.dumps(update))
+    )
+    return cursor.lastrowid
+
+
 def insert_webhooks_update(
     cursor,
+    raw_update_id,
     target_id,
     topic,
     time,
     field,
     value):
-    query = """INSERT into webhooks
-    (target_id, topic, field, time, fat, value)
-    VALUES
-    (%s, %s, %s, %s, %s, %s)
+    """Inserts the parsed update into parsed table:
+    mysql> desc webhooks;
+    +-----------+------------------+------+-----+---------+----------------+
+    | Field     | Type             | Null | Key | Default | Extra          |
+    +-----------+------------------+------+-----+---------+----------------+
+    | id        | int(10) unsigned | NO   | PRI | NULL    | auto_increment |
+    | target_id | varchar(255)     | NO   | MUL | NULL    |                |
+    | topic     | varchar(255)     | NO   | MUL | NULL    |                |
+    | field     | varchar(255)     | NO   |     | NULL    |                |
+    | time      | bigint(20)       | NO   | MUL | NULL    |                |
+    | fat       | int(11)          | YES  |     | NULL    |                |
+    | value     | text             | YES  |     | NULL    |                |
+    | raw_id    | int(10) unsigned | NO   |     | NULL    |                |
+    +-----------+------------------+------+-----+---------+----------------+
+    8 rows in set (0.00 sec)
+
+    mysql> show indexes from webhooks;
+    +----------+------------+-----------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+
+    | Table    | Non_unique | Key_name  | Seq_in_index | Column_name | Collation | Cardinality | Sub_part | Packed | Null | Index_type | Comment | Index_comment |
+    +----------+------------+-----------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+
+    | webhooks |          0 | PRIMARY   |            1 | id          | A         |           0 |     NULL | NULL   |      | BTREE      |         |               |
+    | webhooks |          1 | time      |            1 | time        | A         |           0 |     NULL | NULL   |      | BTREE      |         |               |
+    | webhooks |          1 | topic     |            1 | topic       | A         |           0 |     NULL | NULL   |      | BTREE      |         |               |
+    | webhooks |          1 | topic     |            2 | field       | A         |           0 |     NULL | NULL   |      | BTREE      |         |               |
+    | webhooks |          1 | target_id |            1 | target_id   | A         |           0 |     NULL | NULL   |      | BTREE      |         |               |
+    +----------+------------+-----------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+
     """
-    logging.info('{}{}{}{}{}{}'.format(target_id, topic, field, time, value is not None, value))
-    cursor.execute(query, (target_id, topic, field, time, int(value is not None), value))
+
+    query = """
+    INSERT into webhooks
+        (target_id, topic, field, time, fat, value, raw_id)
+    VALUES
+        (%s, %s, %s, %s, %s, %s, %s)
+    """
+    cursor.execute(query, (target_id, topic, field, time, int(value is not None), value, raw_update_id))
 
 def get_webhooks_updates():
     connection = mysql.connector.connect(**config.mysql)
@@ -74,4 +126,3 @@ def get_webhooks_updates():
     cursor.close()
     connection.close()
     return items
-

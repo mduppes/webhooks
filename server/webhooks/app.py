@@ -1,9 +1,7 @@
-import logging
+import logging from logging_common
 import DB
 import json
 from flask import Flask, request
-
-logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 
 app = Flask(__name__)
 
@@ -32,7 +30,6 @@ def webhooks_backup_receive():
     logging.info(json)
     DB.save_webhooks_update(json)
     return ''
-
 
 if __name__ == "__main__":
     app.run()
