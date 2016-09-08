@@ -1,13 +1,16 @@
-import logging from logging_common
+import logging
 import DB
 import json
 from flask import Flask, request
 
 app = Flask(__name__)
 
+logging.basicConfig(filename='debug.log',level=logging.DEBUG)
+
 @app.route("/api")
 def hello():
-    return json.dumps(DB.get_webhooks_updates(), indent=4, separators=(',', ': '))
+    return json.dumps(DB.get_raw_webhooks_updates(), indent=4, separators=(',', ': '))
+#    return json.dumps(DB.get_webhooks_updates(), indent=4, separators=(',', ': '))
 
 @app.route("/api/webhooks", methods=['get'])
 def webhooks_setup():

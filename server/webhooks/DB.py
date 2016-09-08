@@ -1,7 +1,8 @@
 import mysql.connector
 import config
 import json
-from logging_common import logging
+import logging
+import time
 
 def save_webhooks_update(update):
     """Given a string update, decodes it to json and stores it if valid"""
@@ -15,20 +16,20 @@ def save_webhooks_update(update):
     connection = mysql.connector.connect(**config.mysql)
     cursor = connection.cursor(buffered=True)
 
-    raw_update_id = insert_raw_webhooks_update(update)
+    raw_update_id = insert_raw_webhooks_update(cursor, update)
     for entry in entries:
         fat_ping = 'changes' in entry
         target_id = entry['id']
-        time = entry['time']
+        timestamp = entry['time']
 
         if fat_ping:
             for change in entry['changes']:
                 value = json.dumps(change)
                 field = change['field']
-                insert_webhooks_update(cursor, raw_update_id, target_id, topic, time, field, value)
+                insert_webhooks_update(cursor, raw_update_id, target_id, topic, timestamp, field, value)
         else:
             for field in entry['changed_fields']:
-                insert_webhooks_update(cursor, raw_update_id, target_id, topic, time, field, None)
+                insert_webhooks_update(cursor, raw_update_id, target_id, topic, timestamp, field, None)
 
     connection.commit()
     cursor.close()
@@ -52,10 +53,12 @@ def insert_raw_webhooks_update(cursor, update):
     | value | text             | YES  |     | NULL    |                |
     +-------+------------------+------+-----+---------+----------------+
     """
+
     cursor.execute(
-        "INSERT into webhooks_raw (value) VALUES (%s)",
-        (json.dumps(update))
+        "INSERT INTO webhooks_raw (value, time) VALUES (%s , %s)", 
+        (json.dumps(update), time.time()),
     )
+
     return cursor.lastrowid
 
 
@@ -64,7 +67,7 @@ def insert_webhooks_update(
     raw_update_id,
     target_id,
     topic,
-    time,
+    timestamp,
     field,
     value):
     """Inserts the parsed update into parsed table:
@@ -101,7 +104,19 @@ def insert_webhooks_update(
     VALUES
         (%s, %s, %s, %s, %s, %s, %s)
     """
-    cursor.execute(query, (target_id, topic, field, time, int(value is not None), value, raw_update_id))
+    cursor.execute(query, (target_id, topic, field, timestamp, int(value is not None), value, raw_update_id))
+
+def get_raw_webhooks_updates(): 
+    connection = mysql.connector.connect(**config.mysql)
+    cursor = connection.cursor()
+
+    query = """SELECT value from webhooks_raw order by time desc limit 15"""
+
+    cursor.execute(query)
+    updates = []
+    for value in cursor:
+        updates.append(json.loads(value[0]))
+    return updates
 
 def get_webhooks_updates():
     connection = mysql.connector.connect(**config.mysql)
@@ -113,14 +128,14 @@ def get_webhooks_updates():
     cursor.execute(query)
 
     items = []
-    for (target_id, topic, field, time, fat_ping, value) in cursor:
+    for (target_id, topic, field, timestamp, fat_ping, value) in cursor:
       items.append({
         'target_id': target_id,
         'topic': topic,
         'field': field,
-        'time': time,
+        'time': timestamp,
         'fat_ping': fat_ping,
-        'value': json.loads(value)
+        'value': json.loads(value) if value is not None else None
       })
 
     cursor.close()
