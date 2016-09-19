@@ -9,6 +9,7 @@ setup(name='webhooks server',
       packages=['webhooks'],
       install_requires=[
           'Flask',
+          'flask-cors'
           'records',
       ],
       zip_safe=False)
